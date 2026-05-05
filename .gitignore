@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# 密钥与本地配置（勿提交 Webhook、API Key）
+.env
+.env.*
+*.local
+
+# 本地数据与日志
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/live_signal_state.json
+logs/
+*.log
+
+# 报告与图表（可本地生成）
+reports/*.png
+reports/*.pdf
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 系统
+Thumbs.db
