@@ -206,6 +206,26 @@ class Database:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS oms_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_order_id TEXT NOT NULL UNIQUE,
+                account_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                notional_usdt REAL NOT NULL,
+                status TEXT NOT NULL,
+                last_error TEXT,
+                payload_json TEXT,
+                created_ts INTEGER NOT NULL,
+                updated_ts INTEGER NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oms_orders_status_ts
+            ON oms_orders(status, updated_ts)
+        """)
+
         self.conn.commit()
 
     # ============ K线数据 ============
@@ -687,6 +707,111 @@ class Database:
         )
         self.conn.commit()
         return int(cursor.lastrowid)
+
+    # ============ OMS 订单生命周期 (上线级幂等与状态机) ============
+
+    def oms_get_order_by_client_id(self, client_order_id: str) -> dict | None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM oms_orders WHERE client_order_id = ?",
+            (client_order_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def oms_create_order(
+        self,
+        *,
+        client_order_id: str,
+        account_id: str,
+        symbol: str,
+        side: str,
+        notional_usdt: float,
+        status: str = "new",
+        payload_json: str = "",
+    ) -> dict:
+        import time
+
+        ts = int(time.time())
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """INSERT INTO oms_orders
+               (client_order_id, account_id, symbol, side, notional_usdt,
+                status, last_error, payload_json, created_ts, updated_ts)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                client_order_id,
+                account_id,
+                symbol,
+                side,
+                float(notional_usdt),
+                status,
+                "",
+                payload_json or "{}",
+                ts,
+                ts,
+            ),
+        )
+        self.conn.commit()
+        return self.oms_get_order_by_client_id(client_order_id) or {}
+
+    def oms_update_order(
+        self,
+        client_order_id: str,
+        *,
+        status: str | None = None,
+        last_error: str | None = None,
+        payload_json: str | None = None,
+    ) -> bool:
+        import time
+
+        row = self.oms_get_order_by_client_id(client_order_id)
+        if not row:
+            return False
+        ts = int(time.time())
+        st = status if status is not None else row["status"]
+        err = last_error if last_error is not None else (row.get("last_error") or "")
+        pj = payload_json if payload_json is not None else (row.get("payload_json") or "{}")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """UPDATE oms_orders SET status = ?, last_error = ?,
+               payload_json = ?, updated_ts = ? WHERE client_order_id = ?""",
+            (st, err, pj, ts, client_order_id),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def list_oms_orders(self, *, limit: int = 100, status: str | None = None) -> list[dict]:
+        cursor = self.conn.cursor()
+        if status:
+            cursor.execute(
+                """SELECT * FROM oms_orders WHERE status = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (status, max(1, min(2000, limit))),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM oms_orders ORDER BY id DESC LIMIT ?",
+                (max(1, min(2000, limit)),),
+            )
+        return [dict(r) for r in cursor.fetchall()]
+
+    def expire_pending_approvals(self, *, max_age_hours: int) -> int:
+        """将超时未决审批标记为 expired (不可再用于下单)。"""
+        import time
+
+        if max_age_hours <= 0:
+            return 0
+        cutoff = int(time.time()) - max_age_hours * 3600
+        cur = self.conn.cursor()
+        cur.execute(
+            """UPDATE approval_requests SET status = 'expired', decided_ts = ?,
+               decided_by = 'system', note = coalesce(note,'') || ' [auto-expired SLA]'
+               WHERE status = 'pending' AND created_ts < ?""",
+            (int(time.time()), cutoff),
+        )
+        self.conn.commit()
+        return int(cur.rowcount)
 
     def close(self):
         """关闭数据库连接"""

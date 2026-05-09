@@ -18,6 +18,33 @@ from config import INITIAL_BALANCE, PAPER_LIVE_STATE_PATH
 from db.database import Database
 
 
+def _apply_security_headers(response):
+    """基础安全头; 开关见 config.WEB_SECURITY_HEADERS_ENABLED。"""
+    from config import WEB_SECURITY_HEADERS_ENABLED
+
+    if not WEB_SECURITY_HEADERS_ENABLED:
+        return response
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "geolocation=(), microphone=(), camera=()",
+    )
+    # 纸面看板需内联 script/style; 生产若挂 CDN 需收紧 CSP
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'self'; "
+        "base-uri 'self';"
+    )
+    response.headers.setdefault("Content-Security-Policy", csp)
+    return response
+
+
 def _project_base() -> str:
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
@@ -31,6 +58,8 @@ app = Flask(
     static_folder=os.path.join(_BASE, "web", "static"),
     static_url_path="/static",
 )
+
+app.after_request(_apply_security_headers)
 
 # main.py cmd_web 写入, 驱动看板前端轮询间隔
 DASH_REFRESH_SEC = 8

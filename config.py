@@ -269,6 +269,18 @@ APPROVAL_REQUIRED_ABOVE_USDT = 250_000.0
 # 另类数据示例 CSV (列: symbol,sentiment_score[,asof_ts])
 ALT_DATA_SENTIMENT_CSV = os.environ.get("QUANT_BOT_ALT_SENTIMENT_CSV", "").strip()
 
+# --- 上线增强: OMS 订单表幂等、实时风控、审批 SLA ---
+OMS_IDEMPOTENCY_ENABLED = True
+RISK_REALTIME_RULES_ENABLED = False
+# 毛敞口+本笔名义 / 权益 上限; 0 表示不启用该规则
+RISK_MAX_LEVERAGE_GROSS_TO_EQUITY = 0.0
+# 从峰值回撤比例 (0~1), 由 desk PipelineContext.meta 传入 current_drawdown_pct 时生效
+RISK_BLOCK_NEW_BUY_IF_DRAWDOWN_PCT = None  # 例: 0.25
+# 当日亏损占权益比例 (负数), 由 meta 传入 daily_loss_pct 时生效
+RISK_DAILY_LOSS_LIMIT_PCT = None  # 例: 0.05 表示亏损超过 5% 拦截
+# approval-expire 将早于此刻的 pending 标为 expired (小时)
+APPROVAL_SLA_EXPIRE_HOURS = 168
+
 # ============ 全链路编排 (desk/pipeline) ============
 # paper-live 是否在成交前跑完整链路 (中台规则 + 路由审计 + EMS); 默认关
 FULL_CHAIN_PAPER_LIVE = False
@@ -291,3 +303,8 @@ EMS_APPLY_NETTING = _EMS_N not in ("0", "false", "no", "off")
 MATCHING_HALF_SPREAD_BPS = 2.0
 MATCHING_LOB_LEVELS = 8
 MATCHING_TICK_BPS = 3.0
+
+# ============ Web 安全响应头 (Flask after_request; 见 web/app.py) ============
+# 环境变量 QUANT_BOT_WEB_SECURITY_HEADERS=0 可关闭 (极少数内嵌 iframe 调试场景)
+_WSH = os.environ.get("QUANT_BOT_WEB_SECURITY_HEADERS", "1").strip().lower()
+WEB_SECURITY_HEADERS_ENABLED = _WSH not in ("0", "false", "no", "off")

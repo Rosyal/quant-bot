@@ -1099,6 +1099,8 @@ def cmd_desk_pipeline(
         print("\n交易台全链路\n")
         print(pipeline_stages_to_text(pr.stages))
         print(f"\nok={pr.ok}  {pr.message}")
+        if pr.client_order_id:
+            print(f"  client_order_id: {pr.client_order_id}")
         if pr.router:
             print(f"  router: {pr.router.reason} px={pr.router.effective_price}")
         if pr.ems is not None:
@@ -1318,6 +1320,125 @@ def cmd_alt_data_status():
     print(json.dumps(sentiment_stub_status(path), ensure_ascii=False, indent=2))
 
 
+def cmd_ops_readiness():
+    """运营就绪自检 (JSON): OMS/风控开关、待审批、因子与另类数据健康。"""
+    import config as cfg
+
+    from factors.platform_health import platform_health
+
+    db = Database()
+    try:
+        pending = db.list_approval_requests(status="pending", limit=500)
+        oms_rows = db.list_oms_orders(limit=200)
+    finally:
+        db.close()
+    out = {
+        "router_backend": getattr(cfg, "ROUTER_BACKEND", ""),
+        "ccxt_live_enabled": bool(getattr(cfg, "CCXT_LIVE_ENABLED", False)),
+        "oms_idempotency_enabled": bool(getattr(cfg, "OMS_IDEMPOTENCY_ENABLED", True)),
+        "risk_realtime_rules_enabled": bool(
+            getattr(cfg, "RISK_REALTIME_RULES_ENABLED", False)
+        ),
+        "approval_sla_expire_hours": int(
+            getattr(cfg, "APPROVAL_SLA_EXPIRE_HOURS", 168) or 168
+        ),
+        "pending_approvals_count": len(pending),
+        "oms_orders_listed": len(oms_rows),
+        "factor_platform": platform_health(),
+        "checklist": [
+            "配置飞书/企微/SMTP/Server酱 之一用于 live/paper-live 告警",
+            "生产须分级开启 ROUTER_BACKEND 与 CCXT_LIVE_ENABLED",
+            "定时任务执行: python main.py approval-expire --hours <SLA>",
+            "desk 全链路可在 PipelineContext.meta 传入 client_order_id / current_drawdown_pct / daily_loss_pct",
+            "上线前: python main.py security-check; 日终: python main.py reconcile",
+            "备份: python main.py db-backup; 审计抽样: python main.py regulatory-export --out reports/audit.csv",
+            "阅读 docs/DELIVERY_HARDENING.md 与 .env.example (密钥勿入库)",
+        ],
+    }
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+def cmd_security_check():
+    """环境与密钥粗检 (非渗透测试)。"""
+    from security.env_hardening import run_security_precheck
+
+    print(json.dumps(run_security_precheck(), ensure_ascii=False, indent=2))
+
+
+def cmd_reconcile():
+    """OMS / 执行 / 划拨 / 审计 摘要对账。"""
+    from compliance.reconciliation import reconciliation_to_json, run_reconciliation
+
+    db = Database()
+    try:
+        data = run_reconciliation(db)
+    finally:
+        db.close()
+    print(reconciliation_to_json(data))
+
+
+def cmd_regulatory_export(out_path: str, limit: int, hash_actors: bool):
+    """审计表 CSV 导出 (占位, 非正式监管报送)。"""
+    from compliance.regulatory_stub import export_audit_events_csv
+
+    db = Database()
+    try:
+        meta = export_audit_events_csv(
+            db, out_path, limit=limit, hash_actors=hash_actors
+        )
+    finally:
+        db.close()
+    print(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
+def cmd_db_backup(dest_dir: str | None):
+    """SQLite 冷备份 (与 scripts/db_backup.py 行为一致)。"""
+    import shutil
+    from datetime import datetime
+
+    import config as cfg
+
+    root = os.path.dirname(os.path.abspath(__file__))
+    dest = dest_dir or os.path.join(root, "backups")
+    src = os.path.abspath(cfg.DB_PATH)
+    if not os.path.isfile(src):
+        logger.error(f"源库不存在: {src}")
+        sys.exit(1)
+    os.makedirs(dest, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = os.path.basename(src).replace(".db", "")
+    dst = os.path.join(dest, f"{base}_{ts}.db")
+    shutil.copy2(src, dst)
+    print(json.dumps({"source": src, "destination": dst}, ensure_ascii=False, indent=2))
+
+
+def cmd_approval_expire(hours: int):
+    """将超期 pending 审批标为 expired (不可再用于下单)。"""
+    db = Database()
+    try:
+        n = db.expire_pending_approvals(max_age_hours=max(1, int(hours)))
+        print(f"已更新 {n} 条审批为 expired (创建早于 {hours} 小时且仍为 pending)")
+    finally:
+        db.close()
+
+
+def cmd_oms_orders_list(limit: int, status: str | None):
+    """列出 OMS 订单生命周期记录。"""
+    db = Database()
+    try:
+        rows = db.list_oms_orders(limit=limit, status=status)
+        if not rows:
+            print("(无记录)")
+            return
+        for r in rows:
+            print(
+                f"id={r.get('id')} {r.get('client_order_id')} {r.get('symbol')} "
+                f"{r.get('side')} status={r.get('status')} notional={r.get('notional_usdt')}"
+            )
+    finally:
+        db.close()
+
+
 def cmd_institutional():
     """机构化模块说明 (仿真边界)"""
     from security.permissions import role_matrix_doc
@@ -1339,8 +1460,9 @@ def cmd_institutional():
 
   CLI: portfolio-opt | factors-xsec | router-dry-run | audit-log
   交易台扩展: oms-submit | exposure-report | mo-rules-check |
-              approval-submit/list/resolve | accounts-* | tax-export |
-              factor-desk | alt-data-status
+              approval-submit/list/resolve | approval-expire | oms-orders |
+              accounts-* | tax-export | factor-desk | alt-data-status | ops-readiness |
+              security-check | reconcile | regulatory-export | db-backup
 ================================================================
 """
     )
@@ -2368,6 +2490,57 @@ def main():
         help="另类数据 CSV 配置状态 (情绪等)",
     )
 
+    subparsers.add_parser(
+        "ops-readiness",
+        help="运营就绪自检 JSON (OMS/风控/因子/审批)",
+    )
+    ap_exp = subparsers.add_parser(
+        "approval-expire",
+        help="将超期仍为 pending 的审批标为 expired (SLA 清理)",
+    )
+    ap_exp.add_argument(
+        "--hours",
+        type=int,
+        required=True,
+        help="创建时间早于「当前时刻 − hours」的 pending 一律过期",
+    )
+    oms_list_p = subparsers.add_parser("oms-orders", help="列出 OMS 订单生命周期记录")
+    oms_list_p.add_argument("--limit", type=int, default=50)
+    oms_list_p.add_argument(
+        "--status",
+        default=None,
+        help="按状态过滤: new|routing|ems_submitted|filled|partial_filled|rejected|cancelled",
+    )
+
+    subparsers.add_parser(
+        "security-check",
+        help="环境与密钥粗检 JSON (非渗透测试)",
+    )
+    subparsers.add_parser(
+        "reconcile",
+        help="OMS/执行/划拨/审计 对账摘要 JSON",
+    )
+    reg_export_p = subparsers.add_parser(
+        "regulatory-export",
+        help="审计事件 CSV 导出占位 (非正式监管报送)",
+    )
+    reg_export_p.add_argument("--out", required=True, help="输出 CSV 路径")
+    reg_export_p.add_argument("--limit", type=int, default=10_000)
+    reg_export_p.add_argument(
+        "--hash-actors",
+        action="store_true",
+        help="对 actor 列做 SHA256 短哈希脱敏",
+    )
+    db_bak_p = subparsers.add_parser(
+        "db-backup",
+        help="SQLite 冷备份到指定目录 (默认 项目根/backups)",
+    )
+    db_bak_p.add_argument(
+        "--dest-dir",
+        default=None,
+        help="备份目录; 未指定则为 项目根/backups",
+    )
+
     mc_parser = subparsers.add_parser(
         "monte-carlo",
         help="蒙特卡洛: 多组随机模拟 K 线分别回测并汇总",
@@ -2670,6 +2843,24 @@ def main():
         cmd_factor_desk(mock=args.mock)
     elif args.command == "alt-data-status":
         cmd_alt_data_status()
+    elif args.command == "ops-readiness":
+        cmd_ops_readiness()
+    elif args.command == "approval-expire":
+        cmd_approval_expire(hours=args.hours)
+    elif args.command == "oms-orders":
+        cmd_oms_orders_list(limit=args.limit, status=getattr(args, "status", None))
+    elif args.command == "security-check":
+        cmd_security_check()
+    elif args.command == "reconcile":
+        cmd_reconcile()
+    elif args.command == "regulatory-export":
+        cmd_regulatory_export(
+            out_path=args.out,
+            limit=args.limit,
+            hash_actors=bool(args.hash_actors),
+        )
+    elif args.command == "db-backup":
+        cmd_db_backup(dest_dir=getattr(args, "dest_dir", None))
     else:
         parser.print_help()
 

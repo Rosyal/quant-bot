@@ -92,6 +92,12 @@ python main.py web
 - 本仓库**默认不接交易所自动下单**；若贵方二次开发接入实盘 API，须单独评估：**交易所条款、当地证券/衍生品法规、适当性、反洗钱、客户协议与风险披露**。  
 - **信号推送**（`live`）仅作信息参考，不应被描述为「跟单必赚」。
 
+### 6.1 交付硬化（本仓库可脚本化部分）
+
+- 核对表与**不能做**的边界说明：**[docs/DELIVERY_HARDENING.md](docs/DELIVERY_HARDENING.md)**  
+- 环境变量模板（勿提交真实密钥）：**[.env.example](.env.example)**  
+- 常用命令：`python main.py security-check` | `reconcile` | `regulatory-export --out ...` | `db-backup`（详见上文文档「命令速查」）。
+
 ---
 
 ## 7. 机构化脚手架（与「市面机构系统」的关系）

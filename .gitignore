@@ -13,6 +13,9 @@ env/
 .env.*
 *.local
 
+# 数据库冷备份 (scripts/db_backup.py / main.py db-backup)
+backups/
+
 # 本地数据与日志
 data/*.db
 data/*.sqlite
