@@ -5,7 +5,7 @@
 from __future__ import annotations
 from datetime import datetime
 from utils.logger import get_logger
-from config import INITIAL_BALANCE, FEE_RATE
+from config import INITIAL_BALANCE, FEE_RATE, SLIPPAGE_BPS
 
 logger = get_logger("exchange")
 
@@ -13,14 +13,27 @@ logger = get_logger("exchange")
 class PaperExchange:
     """模拟盘交易所"""
 
-    def __init__(self, initial_balance: float = INITIAL_BALANCE):
+    def __init__(
+        self,
+        initial_balance: float = INITIAL_BALANCE,
+        *,
+        fee_rate: float | None = None,
+        slippage_bps: float | None = None,
+    ):
         self.usdt_balance = initial_balance
         self.coin_balance = 0.0
         self.coin_symbol = ""
-        self.fee_rate = FEE_RATE
+        self.fee_rate = FEE_RATE if fee_rate is None else fee_rate
+        self.slippage_bps = float(SLIPPAGE_BPS if slippage_bps is None else slippage_bps)
         self.trades: list[dict] = []
         self.initial_balance = initial_balance
         logger.info(f"模拟盘已初始化, 初始资金: {initial_balance} USDT")
+
+    def _exec_buy_price(self, reference_price: float) -> float:
+        return reference_price * (1.0 + self.slippage_bps / 10000.0)
+
+    def _exec_sell_price(self, reference_price: float) -> float:
+        return max(reference_price * (1.0 - self.slippage_bps / 10000.0), 1e-12)
 
     def buy(self, symbol: str, price: float, amount_usdt: float) -> dict | None:
         """
@@ -34,9 +47,10 @@ class PaperExchange:
             logger.warning(f"USDT 不足: 需要 {amount_usdt:.2f}, 可用 {self.usdt_balance:.2f}")
             return None
 
+        exec_px = self._exec_buy_price(price)
         fee = amount_usdt * self.fee_rate
         actual_spend = amount_usdt - fee
-        coin_amount = actual_spend / price
+        coin_amount = actual_spend / exec_px
 
         self.usdt_balance -= amount_usdt
         self.coin_balance += coin_amount
@@ -45,7 +59,7 @@ class PaperExchange:
         trade = {
             "symbol": symbol,
             "side": "buy",
-            "price": price,
+            "price": exec_px,
             "amount": coin_amount,
             "fee": fee,
             "total": amount_usdt,
@@ -55,7 +69,7 @@ class PaperExchange:
         self.trades.append(trade)
         logger.info(
             f"买入: {coin_amount:.6f} {self.coin_symbol} "
-            f"@ {price:.2f} USDT (手续费: {fee:.4f})"
+            f"@ {exec_px:.2f} USDT (手续费: {fee:.4f})"
         )
         return trade
 
@@ -71,7 +85,8 @@ class PaperExchange:
             return None
 
         coin_amount = self.coin_balance
-        total_usdt = coin_amount * price
+        exec_px = self._exec_sell_price(price)
+        total_usdt = coin_amount * exec_px
         fee = total_usdt * self.fee_rate
         actual_receive = total_usdt - fee
 
@@ -81,7 +96,7 @@ class PaperExchange:
         trade = {
             "symbol": symbol,
             "side": "sell",
-            "price": price,
+            "price": exec_px,
             "amount": coin_amount,
             "fee": fee,
             "total": actual_receive,
@@ -91,7 +106,7 @@ class PaperExchange:
         self.trades.append(trade)
         logger.info(
             f"卖出: {coin_amount:.6f} {self.coin_symbol} "
-            f"@ {price:.2f} USDT (手续费: {fee:.4f})"
+            f"@ {exec_px:.2f} USDT (手续费: {fee:.4f})"
         )
         return trade
 

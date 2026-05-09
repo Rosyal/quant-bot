@@ -46,8 +46,16 @@ def save_report_charts(
         peak = max(peak, x)
         dd_series.append((peak - x) / peak * 100.0 if peak else 0.0)
 
+    bh = result.get("benchmark_equity_curve")
     fig, ax1 = plt.subplots(figsize=(11, 5))
-    ax1.plot(ts, equity, color="#1f77b4", label="Equity")
+    ax1.plot(ts, equity, color="#1f77b4", label="Strategy equity")
+    if (
+        isinstance(bh, list)
+        and len(bh) == len(candles)
+        and all(isinstance(x, (int, float)) for x in bh)
+    ):
+        ax1.plot(ts, bh, color="#7f7f7f", linestyle="--", linewidth=1.2, label="Buy & hold")
+    ax1.legend(loc="upper left", fontsize=8)
     ax1.set_ylabel("Equity (USDT)")
     ax1.grid(True, alpha=0.3)
 

@@ -6,9 +6,56 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta
 from utils.logger import get_logger
-from config import TIMEFRAME, BACKTEST_DAYS
+from config import BACKTEST_DAYS, MARKET_MODE
 
 logger = get_logger("data")
+
+
+def fetch_ohlcv(symbol: str, timeframe: str, days: int | None = None) -> list[dict]:
+    """
+    按 config.MARKET_MODE 拉 K 线: crypto→ccxt / cn_a→AkShare。
+    """
+    d = days if days is not None else BACKTEST_DAYS
+    if MARKET_MODE == "cn_a":
+        if "/" in str(symbol):
+            logger.error(
+                "MARKET_MODE=cn_a 时请使用 6 位 A股代码 (如 600519), 不要使用 BTC/USDT 形式"
+            )
+            return []
+        from data_fetcher_cn import fetch_ohlcv_cn
+
+        return fetch_ohlcv_cn(symbol, timeframe, d)
+    return fetch_ohlcv_ccxt(symbol, timeframe, d)
+
+
+def fetch_ohlcv_latest(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
+    if MARKET_MODE == "cn_a":
+        if "/" in str(symbol):
+            logger.error("MARKET_MODE=cn_a 时请使用 6 位 A股代码")
+            return []
+        from data_fetcher_cn import fetch_ohlcv_cn_latest
+
+        return fetch_ohlcv_cn_latest(symbol, timeframe, limit)
+    return fetch_ohlcv_ccxt_latest(symbol, timeframe, limit)
+
+
+def fetch_ohlcv_since(
+    symbol: str,
+    timeframe: str,
+    since_ms: int,
+    *,
+    max_batches: int = 80,
+) -> list[dict]:
+    if MARKET_MODE == "cn_a":
+        if "/" in str(symbol):
+            logger.error("MARKET_MODE=cn_a 时请使用 6 位 A股代码")
+            return []
+        from data_fetcher_cn import fetch_ohlcv_cn_since
+
+        return fetch_ohlcv_cn_since(symbol, timeframe, since_ms)
+    return fetch_ohlcv_ccxt_since(
+        symbol, timeframe, since_ms, max_batches=max_batches
+    )
 
 
 def timeframe_to_seconds(timeframe: str) -> int:
@@ -140,18 +187,22 @@ def sync_symbol_to_db(db, symbol: str, timeframe: str, *, days_if_empty: int) ->
     tf_sec = timeframe_to_seconds(timeframe)
 
     if max_ts is None:
-        candles = fetch_ohlcv_ccxt(symbol, timeframe, days_if_empty)
+        candles = fetch_ohlcv(symbol, timeframe, days_if_empty)
     else:
         overlap = 5
         since_ms = max(0, (max_ts - overlap * tf_sec)) * 1000
-        candles = fetch_ohlcv_ccxt_since(symbol, timeframe, since_ms)
+        candles = fetch_ohlcv_since(symbol, timeframe, since_ms)
 
     new_bars = len(candles)
     if candles:
         db.save_ohlcv(symbol, timeframe, candles)
 
     merged = db.get_ohlcv(symbol, timeframe, limit=50_000)
-    gaps = detect_ohlcv_gaps(merged, timeframe)
+    tf_l = (timeframe or "").strip().lower()
+    if MARKET_MODE == "cn_a" and tf_l in ("1d", "d", "day", "1day"):
+        gaps = []
+    else:
+        gaps = detect_ohlcv_gaps(merged, timeframe)
     if gaps:
         logger.warning(
             f"{symbol} {timeframe} 发现 {len(gaps)} 处可能缺档 "

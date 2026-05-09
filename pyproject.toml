@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-bot"
+version = "0.1.0"
+description = "量化研究与回测脚手架（数字货币 / A 股行情、纸面模拟、机构化扩展点）"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "LicenseRef-Proprietary"
+authors = [{ name = "quant-bot" }]
+dependencies = [
+    "ccxt>=4.0.0",
+    "matplotlib>=3.7.0",
+    "flask>=3.0.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "akshare>=1.13.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+build-win = ["pyinstaller>=6.0"]
+pdf = ["fpdf2>=2.7.0"]
+
+[project.scripts]
+quant-bot = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*"]
+
+[tool.setuptools]
+py-modules = ["main", "config", "data_fetcher", "data_fetcher_cn"]

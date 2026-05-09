@@ -18,12 +18,11 @@ from config import (
     LIVE_POLL_INTERVAL_SEC,
     LIVE_LOOKBACK_BARS,
     LIVE_STATE_PATH,
-    FEISHU_WEBHOOK_URL,
-    GENERIC_WEBHOOK_URL,
 )
-from data_fetcher import fetch_ohlcv_ccxt_latest, generate_mock_data
+from data_fetcher import fetch_ohlcv_latest, generate_mock_data
+from notifications.channels import notify_all_from_config
+from news.assist import append_news_digest_to_message
 from strategy import get_signal_fn
-from notifications.webhook import notify_text
 from utils.logger import get_logger
 
 logger = get_logger("live")
@@ -75,7 +74,7 @@ def run_live_polling(
                     silent=True,
                 )
             else:
-                candles = fetch_ohlcv_ccxt_latest(
+                candles = fetch_ohlcv_latest(
                     symbol, TIMEFRAME, limit=LIVE_LOOKBACK_BARS
                 )
             if len(candles) < 10:
@@ -101,11 +100,8 @@ def run_live_polling(
                     f"K线时间: {ts}\n"
                     f"(仅提示, 未自动下单)"
                 )
-                notify_text(
-                    msg,
-                    feishu_url=FEISHU_WEBHOOK_URL,
-                    generic_url=GENERIC_WEBHOOK_URL,
-                )
+                msg = append_news_digest_to_message(msg, paper=False)
+                notify_all_from_config(msg, title="Quant Live 信号")
                 state[key] = sig
                 logger.info(f"{symbol} 新信号: {sig} @ {price}")
             elif sig == "hold" and prev in ("buy", "sell"):

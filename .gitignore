@@ -18,8 +18,17 @@ data/*.db
 data/*.sqlite
 data/*.sqlite3
 data/live_signal_state.json
+data/audit.jsonl
+data/paper_live_state.json
 logs/
 *.log
+
+# 构建与打包产物
+build/
+dist/
+*.egg-info/
+quant_bot.egg-info/
+.pytest_cache/
 
 # 报告与图表（可本地生成）
 reports/*.png

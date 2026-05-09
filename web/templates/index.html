@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#0f1419" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <title>Quant 纸面实盘看板</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --bg: #0f1419; --card: #1a2332; --text: #e7ecf3; --muted: #8b9cb3; --accent: #3b82f6; }
+    * { box-sizing: border-box; }
+    html { touch-action: manipulation; }
+    body { font-family: system-ui, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text);
+           padding-bottom: env(safe-area-inset-bottom, 0); padding-left: env(safe-area-inset-left, 0);
+           padding-right: env(safe-area-inset-right, 0); }
+    header { padding: calc(1rem + env(safe-area-inset-top, 0)) 1.5rem 1rem;
+              border-bottom: 1px solid #2a3545; padding-left: calc(1.5rem + env(safe-area-inset-left, 0));
+              padding-right: calc(1.5rem + env(safe-area-inset-right, 0)); }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+    .sub { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
+    main { padding: 1rem 1.5rem 2rem; max-width: 1200px; margin: 0 auto; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card { background: var(--card); border-radius: 10px; padding: 1rem 1.25rem; border: 1px solid #2a3545; }
+    .card h2 { margin: 0 0 0.75rem; font-size: 1rem; color: var(--muted); font-weight: 500; }
+    .big { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+    canvas { max-height: min(360px, 45vh); width: 100% !important; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #2a3545; }
+    th { color: var(--muted); font-weight: 500; }
+    .buy { color: #34d399; }
+    .sell { color: #f87171; }
+    .empty { color: var(--muted); padding: 1rem 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>纸面实盘</h1>
+    <p class="sub">状态文件: {{ state_path }} · 请先运行 <code>python main.py paper-live</code></p>
+  </header>
+  <main style="padding-bottom: calc(2rem + env(safe-area-inset-bottom));">
+    <div class="grid" style="margin-bottom: 1rem;">
+      <div class="card">
+        <h2>可用 USDT</h2>
+        <div class="big" id="usdt">—</div>
+      </div>
+      <div class="card">
+        <h2>持仓</h2>
+        <div id="positions" class="empty">加载中…</div>
+      </div>
+      <div class="card">
+        <h2>更新时间</h2>
+        <div class="big" id="updated">—</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom: 1rem;">
+      <h2>资金曲线</h2>
+      <canvas id="eqChart"></canvas>
+    </div>
+    <div class="card">
+      <h2>最近成交</h2>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>品种</th>
+              <th>方向</th>
+              <th>价格</th>
+              <th>数量</th>
+              <th>策略</th>
+            </tr>
+          </thead>
+          <tbody id="tradesBody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+  <script>
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    let chart;
+    let etagPortfolio = '';
+    let etagEq = '';
+    let etagTr = '';
+    const REFRESH_MS = Math.max(3000, ({{ refresh_sec|default(8) }} * 1000));
+
+    function fmtTime(ts) {
+      if (!ts) return "—";
+      const d = new Date(ts * 1000);
+      return d.toLocaleString();
+    }
+    async function fetchJsonIfChanged(url, etagStore) {
+      const h = etagStore ? { "If-None-Match": etagStore } : {};
+      const r = await fetch(url, { headers: h });
+      if (r.status === 304) return { _unchanged: true };
+      let nextEtag = r.headers.get("ETag") || "";
+      let data;
+      try { data = await r.json(); } catch (_) { data = {}; }
+      return { ok: true, etag: nextEtag, data };
+    }
+
+    async function refresh() {
+      try {
+        const [rPf, rEq, rTr] = await Promise.all([
+          fetchJsonIfChanged("/api/portfolio", etagPortfolio),
+          fetchJsonIfChanged("/api/equity", etagEq),
+          fetchJsonIfChanged("/api/trades", etagTr),
+        ]);
+        let pf = null, eq = null, tr = null;
+        if (rPf._unchanged) {
+          pf = null;
+        } else if (rPf.ok) {
+          etagPortfolio = rPf.etag;
+          pf = rPf.data;
+        }
+        if (rEq._unchanged) {
+          eq = null;
+        } else if (rEq.ok) {
+          etagEq = rEq.etag;
+          eq = rEq.data;
+        }
+        if (rTr._unchanged) {
+          tr = null;
+        } else if (rTr.ok) {
+          etagTr = rTr.etag;
+          tr = rTr.data;
+        }
+        const firstPf = pf || (typeof window.__lastPortfolio !== "undefined" ? window.__lastPortfolio : {});
+        if (pf && !pf.error) window.__lastPortfolio = pf;
+
+        document.getElementById("usdt").textContent =
+          firstPf.usdt != null ? Number(firstPf.usdt).toFixed(2) : "—";
+        document.getElementById("updated").textContent = fmtTime(firstPf.updated_at);
+
+        const posEl = document.getElementById("positions");
+        const pos = firstPf.positions || {};
+        const keys = Object.keys(pos).filter(k => pos[k] > 0);
+        if (!keys.length) {
+          posEl.innerHTML = '<span class="empty">无持仓</span>';
+        } else {
+          posEl.innerHTML = keys.map(k =>
+            `<div><strong>${k}</strong> · ${Number(pos[k]).toFixed(6)}</div>`
+          ).join("");
+        }
+
+        const eqData = eq || (typeof window.__lastEquity !== "undefined" ? window.__lastEquity : {});
+        if (eq && !eq.error) window.__lastEquity = eq;
+        const pts = (eqData.points || []).map(p => ({ x: p.t * 1000, y: p.equity }));
+        const ctx = document.getElementById("eqChart").getContext("2d");
+        if (!chart) {
+          chart = new Chart(ctx, {
+            type: "line",
+            data: {
+              datasets: [{
+                label: "权益 USDT",
+                data: pts,
+                borderColor: "#3b82f6",
+                backgroundColor: "rgba(59,130,246,0.1)",
+                fill: true,
+                tension: 0.15,
+                pointRadius: 0,
+              }],
+            },
+            options: {
+              responsive: true,
+              scales: {
+                x: { type: "linear", title: { display: true, text: "时间" },
+                     ticks: { callback: (v) => new Date(v).toLocaleString() } },
+                y: { title: { display: true, text: "USDT" } },
+              },
+            },
+          });
+        } else {
+          chart.data.datasets[0].data = pts;
+          chart.update("none");
+        }
+
+        const tbody = document.getElementById("tradesBody");
+        const trData = tr || (typeof window.__lastTrades !== "undefined" ? window.__lastTrades : {});
+        if (tr && !tr.error) window.__lastTrades = tr;
+        const rows = trData.trades || [];
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无成交</td></tr>';
+        } else {
+          tbody.innerHTML = rows.map(t => {
+            const side = (t.side || "").toLowerCase();
+            const cls = side === "buy" ? "buy" : "sell";
+            return `<tr>
+              <td>${fmtTime(t.timestamp)}</td>
+              <td>${t.symbol || ""}</td>
+              <td class="${cls}">${side === "buy" ? "买入" : "卖出"}</td>
+              <td>${Number(t.price).toFixed(4)}</td>
+              <td>${Number(t.amount).toFixed(6)}</td>
+              <td>${t.strategy || ""}</td>
+            </tr>`;
+          }).join("");
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    refresh();
+    setInterval(refresh, REFRESH_MS);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refresh();
+    });
+  </script>
+</body>
+</html>

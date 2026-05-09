@@ -42,6 +42,58 @@ def _simple_returns(equity: list[float]) -> list[float]:
     return out
 
 
+def ulcer_index(equity: list[float]) -> float:
+    """
+    Ulcer Index (Martin): 对百分比回撤平方均值再开方, 越小越好。
+    与最大回撤互补, 惩罚持续浅回撤。
+    """
+    if not equity:
+        return float("nan")
+    peak = equity[0]
+    acc = 0.0
+    n = len(equity)
+    for x in equity:
+        peak = max(peak, x)
+        if peak > 0:
+            pct_dd = 100.0 * (peak - x) / peak
+            acc += pct_dd * pct_dd
+    return math.sqrt(acc / n)
+
+
+def omega_ratio(returns: list[float], threshold: float = 0.0) -> float:
+    """简化 Omega: 高于阈值的超额收益和 / 低于阈值的缺口和。"""
+    if len(returns) < 2:
+        return float("nan")
+    gains = sum(max(0.0, r - threshold) for r in returns)
+    losses = sum(max(0.0, threshold - r) for r in returns)
+    if losses < 1e-15:
+        return float("nan") if gains < 1e-15 else float("inf")
+    return gains / losses
+
+
+def buy_hold_equity_curve(
+    candles: list[dict],
+    initial_balance: float,
+    *,
+    fee_rate: float,
+    slippage_bps: float,
+) -> list[float]:
+    """
+    买入持有: 首根 K 线收盘全仓买入, 后续按收盘价盯市 (无再平衡)。
+    与回测使用相同单边手续费与开仓滑点。
+    """
+    if not candles or initial_balance <= 0:
+        return []
+    slip = slippage_bps / 10000.0
+    first_close = float(candles[0]["close"])
+    exec_px = first_close * (1.0 + slip)
+    spend = initial_balance
+    fee = spend * fee_rate
+    net = spend - fee
+    qty = net / exec_px
+    return [qty * float(c["close"]) for c in candles]
+
+
 def sharpe_ratio(returns: list[float], periods_per_year: float, rf_annual: float = 0.0) -> float:
     """年化夏普; rf_annual 为无风险年化利率"""
     if len(returns) < 3:
@@ -96,15 +148,18 @@ def compute_performance_metrics(
     ts_end: int,
     timeframe: str,
     total_return_pct: float,
+    rf_annual: float = 0.0,
 ) -> dict[str, float]:
     ppy = _periods_per_year(timeframe)
     years = (ts_end - ts_start) / (365.25 * 24 * 3600)
     mdd = max_drawdown(equity)
     rets = _simple_returns(equity)
-    sharpe = sharpe_ratio(rets, ppy)
+    sharpe = sharpe_ratio(rets, ppy, rf_annual=rf_annual)
     sortino = sortino_ratio(rets, ppy)
     cagr_dec = cagr(total_return_pct, years) if years > 0 else float("nan")
     calmar = calmar_ratio(cagr_dec, mdd)
+    ulcer = ulcer_index(equity)
+    om = omega_ratio(rets, threshold=0.0)
 
     return {
         "max_drawdown_pct": mdd * 100.0,
@@ -112,6 +167,8 @@ def compute_performance_metrics(
         "sortino": sortino,
         "cagr_pct": cagr_dec * 100.0 if not math.isnan(cagr_dec) else float("nan"),
         "calmar": calmar,
+        "ulcer_index": ulcer,
+        "omega": om,
         "years": years,
         "periods_per_year": ppy,
     }

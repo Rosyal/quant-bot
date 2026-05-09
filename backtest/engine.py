@@ -15,20 +15,20 @@ from config import (
     SYMBOL,
     TIMEFRAME,
     INITIAL_BALANCE,
-    TRADE_AMOUNT_PCT,
     BACKTEST_DAYS,
     STRATEGY,
     MIN_CANDLES_FOR_BACKTEST,
-    RSIMACD_TRADE_AMOUNT_PCT,
-    RISK_ENABLED,
-    RISK_MAX_DRAWDOWN_PCT,
-    RISK_FORCE_FLAT_ON_DRAWDOWN,
-    RISK_MAX_POSITION_PCT,
 )
 from exchange.paper import PaperExchange
 from strategy import get_signal_fn
 from risk.manager import RiskManager
-from backtest.metrics import compute_performance_metrics
+from backtest.advanced_metrics import compute_advanced_metrics
+from backtest.metrics import (
+    buy_hold_equity_curve,
+    compute_performance_metrics,
+)
+from backtest.tca import compute_tca_summary
+from research.kelly import kelly_from_sell_trades
 
 logger = get_logger("backtest")
 
@@ -52,8 +52,8 @@ def _config_overrides(overrides: dict[str, Any] | None):
 
 def _position_pct(strategy_key: str) -> float:
     if strategy_key == "rsi_macd":
-        return RSIMACD_TRADE_AMOUNT_PCT
-    return TRADE_AMOUNT_PCT
+        return cfg.RSIMACD_TRADE_AMOUNT_PCT
+    return cfg.TRADE_AMOUNT_PCT
 
 
 def run_backtest(
@@ -63,9 +63,12 @@ def run_backtest(
     strategy: str | None = None,
     config_overrides: dict[str, Any] | None = None,
     include_equity_curve: bool = False,
+    include_trades: bool = False,
+    precomputed_signals: list[dict] | None = None,
 ) -> dict:
     """
     :param config_overrides: 临时覆盖 config 模块属性 (用于网格搜索), 回测结束自动恢复
+    :param precomputed_signals: 与 candles 等长的信号序列; 若提供则不再调用策略 generate_signals
     """
     with _config_overrides(config_overrides):
         return _run_backtest_impl(
@@ -73,6 +76,8 @@ def run_backtest(
             quiet=quiet,
             strategy=strategy,
             include_equity_curve=include_equity_curve,
+            include_trades=include_trades,
+            precomputed_signals=precomputed_signals,
         )
 
 
@@ -82,6 +87,8 @@ def _run_backtest_impl(
     quiet: bool,
     strategy: str | None,
     include_equity_curve: bool,
+    include_trades: bool = False,
+    precomputed_signals: list[dict] | None = None,
 ) -> dict:
     if len(candles) < MIN_CANDLES_FOR_BACKTEST:
         if not quiet:
@@ -91,31 +98,44 @@ def _run_backtest_impl(
         return {}
 
     strat = (strategy or STRATEGY).strip().lower()
+    if precomputed_signals is not None:
+        if len(precomputed_signals) != len(candles):
+            if not quiet:
+                logger.error(
+                    f"预计算信号条数 {len(precomputed_signals)} 与 K 线 {len(candles)} 不一致"
+                )
+            return {}
+        if not strat:
+            strat = "precomputed"
+
     pos_pct = _position_pct(strat)
 
     risk: RiskManager | None = None
-    if RISK_ENABLED:
+    if cfg.RISK_ENABLED:
         risk = RiskManager(
             initial_equity=INITIAL_BALANCE,
-            max_drawdown_pct=RISK_MAX_DRAWDOWN_PCT,
-            force_flat_on_breach=RISK_FORCE_FLAT_ON_DRAWDOWN,
-            max_position_pct=RISK_MAX_POSITION_PCT,
+            max_drawdown_pct=cfg.RISK_MAX_DRAWDOWN_PCT,
+            force_flat_on_breach=cfg.RISK_FORCE_FLAT_ON_DRAWDOWN,
+            max_position_pct=cfg.RISK_MAX_POSITION_PCT,
         )
 
     if not quiet:
         logger.info(f"开始回测: {len(candles)} 条K线, {SYMBOL} {TIMEFRAME}")
         logger.info(
             f"策略: {strat}, 初始资金: {INITIAL_BALANCE} USDT, "
-            f"目标单笔比例: {pos_pct*100:.0f}% (经风控封顶 {RISK_MAX_POSITION_PCT*100:.0f}%)"
+            f"目标单笔比例: {pos_pct*100:.0f}% (经风控封顶 {cfg.RISK_MAX_POSITION_PCT*100:.0f}%)"
         )
-        if RISK_ENABLED:
+        if cfg.RISK_ENABLED:
             logger.info(
-                f"风控: 最大回撤熔断 {RISK_MAX_DRAWDOWN_PCT*100:.1f}%, "
-                f"触发后{'强制平仓+禁止开仓' if RISK_FORCE_FLAT_ON_DRAWDOWN else '仅禁止开仓'}"
+                f"风控: 最大回撤熔断 {cfg.RISK_MAX_DRAWDOWN_PCT*100:.1f}%, "
+                f"触发后{'强制平仓+禁止开仓' if cfg.RISK_FORCE_FLAT_ON_DRAWDOWN else '仅禁止开仓'}"
             )
 
-    exchange = PaperExchange(INITIAL_BALANCE)
-    signals = get_signal_fn(strat)(candles)
+    exchange = PaperExchange(INITIAL_BALANCE, fee_rate=cfg.FEE_RATE, slippage_bps=cfg.SLIPPAGE_BPS)
+    if precomputed_signals is not None:
+        signals = precomputed_signals
+    else:
+        signals = get_signal_fn(strat)(candles)
 
     buy_price = 0.0
     equity_curve: list[float] = []
@@ -207,21 +227,80 @@ def _run_backtest_impl(
 
     result["strategy"] = strat
     result["position_pct"] = pos_pct
-    result["risk_enabled"] = RISK_ENABLED
+    result["risk_enabled"] = cfg.RISK_ENABLED
     result["risk_halted"] = risk.halted if risk else False
     result["risk_liquidations"] = risk_liquidations
-    result["risk_max_position_pct"] = RISK_MAX_POSITION_PCT
+    result["risk_max_position_pct"] = cfg.RISK_MAX_POSITION_PCT
 
+    rf = float(getattr(cfg, "BACKTEST_RISK_FREE_ANNUAL", 0.0))
     m = compute_performance_metrics(
         equity_curve,
         ts_start=candles[0]["timestamp"],
         ts_end=candles[-1]["timestamp"],
         timeframe=TIMEFRAME,
         total_return_pct=result["profit_pct"],
+        rf_annual=rf,
     )
     result["metrics"] = m
+    ppy = float(m.get("periods_per_year") or 365.25 * 24)
+
+    sell_profits = [
+        float(t["profit"])
+        for t in sell_trades
+        if t.get("profit") is not None
+    ]
+    bh_curve = buy_hold_equity_curve(
+        candles,
+        INITIAL_BALANCE,
+        fee_rate=cfg.FEE_RATE,
+        slippage_bps=cfg.SLIPPAGE_BPS,
+    )
+    if bh_curve:
+        bh_final = bh_curve[-1]
+        bh_profit_pct = (bh_final - INITIAL_BALANCE) / INITIAL_BALANCE * 100.0
+        result["benchmark_profit_pct"] = bh_profit_pct
+        result["benchmark_final_value"] = bh_final
+        bm = compute_performance_metrics(
+            bh_curve,
+            ts_start=candles[0]["timestamp"],
+            ts_end=candles[-1]["timestamp"],
+            timeframe=TIMEFRAME,
+            total_return_pct=bh_profit_pct,
+            rf_annual=rf,
+        )
+        result["benchmark_metrics"] = bm
+        result["alpha_profit_pct"] = result["profit_pct"] - bh_profit_pct
+    else:
+        result["benchmark_profit_pct"] = float("nan")
+        result["benchmark_metrics"] = {}
+        result["alpha_profit_pct"] = float("nan")
+
+    result["total_fees_paid"] = sum(float(t.get("fee") or 0) for t in exchange.trades)
+    result["slippage_bps_used"] = float(cfg.SLIPPAGE_BPS)
+    result["fee_rate_used"] = float(cfg.FEE_RATE)
+
+    bh_for_adv = bh_curve if (bh_curve and len(bh_curve) == len(equity_curve)) else None
+    result["advanced"] = compute_advanced_metrics(
+        equity_curve,
+        benchmark_equity=bh_for_adv,
+        sell_trade_profits=sell_profits,
+        periods_per_year=ppy,
+    )
+    result["tca"] = compute_tca_summary(
+        exchange.trades,
+        INITIAL_BALANCE,
+        len(candles),
+        periods_per_year=ppy,
+    )
+    result["kelly_hint"] = kelly_from_sell_trades(sell_profits)
+
+    if include_trades:
+        result["trades"] = [dict(t) for t in exchange.trades]
+
     if include_equity_curve:
         result["equity_curve"] = equity_curve
+        if bh_curve:
+            result["benchmark_equity_curve"] = bh_curve
 
     return result
 
@@ -238,10 +317,23 @@ def print_backtest_report(result: dict):
     calmar = m.get("calmar", float("nan"))
     cagr_pct = m.get("cagr_pct", float("nan"))
     mdd = m.get("max_drawdown_pct", float("nan"))
+    ulcer = m.get("ulcer_index", float("nan"))
+    omega = m.get("omega", float("nan"))
+    ir = (result.get("advanced") or {}).get("information_ratio_vs_bh", float("nan"))
+    ddur = (result.get("advanced") or {}).get("max_drawdown_duration_bars", float("nan"))
+    pct_uw = (result.get("advanced") or {}).get("pct_bars_under_peak", float("nan"))
+    mcl = (result.get("advanced") or {}).get("max_consecutive_losses", float("nan"))
+    tca = result.get("tca") or {}
+    kelly = result.get("kelly_hint") or {}
+    kf = kelly.get("kelly_fraction", float("nan"))
+    bh_pct = result.get("benchmark_profit_pct", float("nan"))
+    alpha_pct = result.get("alpha_profit_pct", float("nan"))
 
     def _fmt(x: float) -> str:
         if isinstance(x, float) and math.isnan(x):
             return "   n/a"
+        if isinstance(x, float) and math.isinf(x):
+            return "     inf"
         return f"{x:>8.2f}"
 
     lines = [
@@ -263,6 +355,22 @@ def print_backtest_report(result: dict):
         f"  最大回撤:     {_fmt(mdd)} %",
         f"  年化收益:     {_fmt(cagr_pct)} %",
         f"  卡玛比率:     {_fmt(calmar)}",
+        f"  Ulcer 指数:   {_fmt(ulcer)}",
+        f"  Omega:        {_fmt(omega)}",
+        f"  信息比率(vs B&H): {_fmt(ir)}",
+        f"  最长回撤期(K线): {_fmt(ddur)}",
+        f"  低于峰值K线占比: {_fmt(pct_uw)} %",
+        f"  最大连亏笔数:   {_fmt(mcl)}",
+        "-" * 55,
+        f"  买入持有收益: {_fmt(bh_pct)} %",
+        f"  超额(alpha):  {_fmt(alpha_pct)} %  (策略 - 买入持有)",
+        f"  累计手续费:   {result.get('total_fees_paid', 0):>12.4f} USDT",
+        f"  成交模型:     手续费 {result.get('fee_rate_used', 0)*100:.3f}% + 滑点 {result.get('slippage_bps_used', 0):.1f} bps",
+        "-" * 55,
+        f"  TCA 成交名义:   {tca.get('gross_traded_notional_usd', 0):>12.2f} USDT",
+        f"  费用/成交 bps: {tca.get('fee_bps_on_gross_traded', 0):>12.2f}",
+        f"  换手代理/年:   {tca.get('turnover_per_year_proxy', 0):>12.2f}",
+        f"  Kelly(半凯利上限25%): {_fmt(kf)}",
         "-" * 55,
         f"  风控启用:     {'是' if result.get('risk_enabled') else '否'}",
         f"  熔断后禁止开仓: {'是' if result.get('risk_halted') else '否'}",
