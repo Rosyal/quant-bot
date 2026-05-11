@@ -16,6 +16,7 @@ from strategy.donchian import generate_signals as donchian_signals
 from strategy.roc_momentum import generate_signals as roc_mom_signals
 from strategy.ensemble import generate_signals as ensemble_signals
 from strategy.ensemble_strict import generate_signals as ensemble_strict_signals
+from strategy.stoch_cross import generate_signals as stoch_cross_signals
 
 SignalFn = Callable[[list[dict]], list[dict]]
 
@@ -33,6 +34,7 @@ STRATEGY_REGISTRY: dict[str, SignalFn] = {
     "bollinger": bollinger_signals,
     "ensemble": ensemble_signals,
     "ensemble_strict": ensemble_strict_signals,
+    "stoch_cross": stoch_cross_signals,
 }
 
 # compare / compare-matrix 默认顺序 (可按名称筛选子集)
@@ -48,6 +50,7 @@ COMPARE_STRATEGY_ORDER: tuple[str, ...] = (
     "macd",
     "bollinger",
     "vibe",
+    "stoch_cross",
     "ensemble",
     "ensemble_strict",
 )

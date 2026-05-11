@@ -147,3 +147,37 @@ def macd(
         if sig_seq[j] is not None:
             hist[idx] = macd_seq[j] - sig_seq[j]
     return line, signal, hist
+
+
+# --- 扩展指标 (K 线 dict 列表接口，见 strategy/technical/base.py) ---
+from strategy.technical.base import adx as adx_from_candles
+from strategy.technical.base import obv as obv_from_candles
+from strategy.technical.base import stochastic as stochastic_from_candles
+from strategy.technical.base import williams_r as williams_r_from_candles
+
+
+def adx(candles: list[dict], period: int = 14):
+    """ADX 与 +DI/-DI；`candles` 每项须含 high/low/close。"""
+    return adx_from_candles(candles, period=period)
+
+
+def stochastic(
+    candles: list[dict],
+    k_period: int = 14,
+    slowing: int = 3,
+    d_period: int = 3,
+):
+    """随机指标；**接受 candles 列表**，非三个独立序列。"""
+    return stochastic_from_candles(
+        candles, k_period=k_period, slowing=slowing, d_period=d_period
+    )
+
+
+def williams_r(candles: list[dict], period: int = 14):
+    """Williams %R。"""
+    return williams_r_from_candles(candles, period=period)
+
+
+def obv(candles: list[dict]) -> list[float]:
+    """能量潮。"""
+    return obv_from_candles(candles)

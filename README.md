@@ -95,5 +95,8 @@ python main.py status
 - **Walk-forward**：`python main.py walk-forward --mock`（滚动样本外，抗过拟合参考）。
 - **扩展绩效 / TCA**：信息比率(vs 买入持有)、最长回撤期 K 线、低于峰值占比、最大连亏；成交名义、费用 bps、换手代理；半 Kelly 提示（回测报告内）。
 - **研究与情景**：`sensitivity`（单参数扫描）、`regime-report`（波动率 regime 占比）、`stress-scenario`（最深回撤点起权益冲击）；`backtest --export-trades PATH` 导出成交 CSV。
+- **技术指标库**：`strategy/technical/base.py`（ADX、**Stochastic（入参为 candles 列表）**、Williams %R、OBV），并由 `strategy/indicators.py` 统一导出。
+- **Web 热力图数据**：`GET /api/sensitivity-grid?key=...`（`QUANT_BOT_SENSITIVITY_API_KEY` 或复用 `QUANT_BOT_AUDIT_API_KEY`；参数见 `web/app.py`）。
+- **回测摘要 Excel**：`reports/xlsx_export.py` → `write_backtest_summary_xlsx`（依赖 `openpyxl`）。
 
 与头部商业平台相比仍可能缺少：实盘订单管理系统 (OMS)、实时风控引擎、多账户资金划拨、另类数据与因子平台、合规工作流与审批链等——需按业务单独采购或二次开发。

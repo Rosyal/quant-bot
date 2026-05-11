@@ -319,6 +319,61 @@ def api_product_brief_pdf():
     return Response(raw, mimetype="application/pdf")
 
 
+def _sensitivity_api_key_ok() -> bool:
+    s = os.environ.get("QUANT_BOT_SENSITIVITY_API_KEY", "").strip() or os.environ.get(
+        "QUANT_BOT_AUDIT_API_KEY", ""
+    ).strip()
+    return bool(s) and request.args.get("key") == s
+
+
+def _parse_num_csv(s: str | None) -> list[float | int]:
+    if not s or not str(s).strip():
+        return []
+    out: list[float | int] = []
+    for part in str(s).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "." in part:
+            out.append(float(part))
+        else:
+            out.append(int(part))
+    return out
+
+
+@app.route("/api/sensitivity-grid")
+def api_sensitivity_grid():
+    """
+    双参数敏感性网格 JSON（热力图用 z_sharpe / z_profit_pct）。
+    须设置 QUANT_BOT_SENSITIVITY_API_KEY 或复用 QUANT_BOT_AUDIT_API_KEY，且 ?key= 一致。
+    """
+    if not _sensitivity_api_key_ok():
+        return jsonify({"error": "forbidden_or_grid_api_disabled"}), 403
+    from data_fetcher import generate_mock_data
+    from research.sensitivity import run_parameter_sensitivity_grid
+
+    strategy = (request.args.get("strategy") or "ma_cross").strip().lower()
+    p1 = (request.args.get("param1") or "FAST_PERIOD").strip()
+    p2 = (request.args.get("param2") or "SLOW_PERIOD").strip()
+    v1s = _parse_num_csv(request.args.get("values1")) or [10, 12, 14]
+    v2s = _parse_num_csv(request.args.get("values2")) or [28, 30, 32]
+    try:
+        days = min(120, max(30, int(request.args.get("days", 40))))
+        seed = int(request.args.get("seed", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "bad_integer_param"}), 400
+    candles = generate_mock_data(days, seed=seed, silent=True)
+    grid = run_parameter_sensitivity_grid(
+        candles,
+        strategy=strategy,
+        param1=p1,
+        values1=v1s,
+        param2=p2,
+        values2=v2s,
+    )
+    return jsonify(grid)
+
+
 def main(host: str = "127.0.0.1", port: int = 5050, debug: bool = False) -> None:
     app.run(host=host, port=port, debug=debug, use_reloader=False)
 

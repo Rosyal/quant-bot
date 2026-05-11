@@ -1703,6 +1703,7 @@ def cmd_list_strategies():
     print("  vibe           — 趋势 + 布林/RSI + ATR")
     print("  ensemble       — 多子策略投票 (见 ENSEMBLE_COMPONENTS)")
     print("  ensemble_strict— 高门槛投票 (见 ENSEMBLE_STRICT_*, 信号更稀疏)")
+    print("  stoch_cross    — 随机指标金叉/死叉 + 超买超卖过滤 (演示)")
     print("\nconfig.STRATEGY 切换; compare / optimize / combo-search 见 --help\n")
 
 

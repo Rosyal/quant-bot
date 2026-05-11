@@ -48,5 +48,14 @@ class TestWebPortfolioEtag(unittest.TestCase):
             self.assertEqual(r2.status_code, 304)
 
 
+class TestSensitivityGridApi(unittest.TestCase):
+    def test_sensitivity_grid_forbidden_without_key(self):
+        from web.app import app
+
+        with app.test_client() as c:
+            r = c.get("/api/sensitivity-grid")
+            self.assertEqual(r.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
