@@ -17,6 +17,11 @@ cd quant-bot
 pip install -r requirements.txt
 ```
 
+### 开发与 CI
+
+- 向 `main` 推送或发起 PR 时，**GitHub Actions** 会按 `requirements.txt` 安装依赖并执行 `pytest`（见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)）。
+- `pyproject.toml` 中 `dependencies` 与 `requirements.txt` 已对齐（含 `openpyxl`，供回测摘要 Excel 导出）。
+
 ### 2. 运行回测 (模拟数据, 无需网络)
 
 ```bash
