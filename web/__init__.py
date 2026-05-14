@@ -1,1 +1,3 @@
-# web dashboard package
+"""
+Web 模块
+"""

@@ -1,148 +1,88 @@
 """
 模拟盘交易所
-零成本模拟交易，不连接真实交易所
 """
-from __future__ import annotations
-from datetime import datetime
 from utils.logger import get_logger
-from config import INITIAL_BALANCE, FEE_RATE, SLIPPAGE_BPS
 
-logger = get_logger("exchange")
+logger = get_logger("exchange.paper")
 
 
 class PaperExchange:
     """模拟盘交易所"""
 
-    def __init__(
-        self,
-        initial_balance: float = INITIAL_BALANCE,
-        *,
-        fee_rate: float | None = None,
-        slippage_bps: float | None = None,
-    ):
-        self.usdt_balance = initial_balance
-        self.coin_balance = 0.0
-        self.coin_symbol = ""
-        self.fee_rate = FEE_RATE if fee_rate is None else fee_rate
-        self.slippage_bps = float(SLIPPAGE_BPS if slippage_bps is None else slippage_bps)
-        self.trades: list[dict] = []
+    def __init__(self, initial_balance: float = 10000.0, fee_rate: float = 0.001, slippage_pct: float = 0.05):
         self.initial_balance = initial_balance
-        logger.info(f"模拟盘已初始化, 初始资金: {initial_balance} USDT")
+        self.fee_rate = fee_rate
+        self.slippage_pct = slippage_pct
+        self.cash = initial_balance
+        self.coin = 0.0
+        self.trades = []
+        self.buy_price = 0.0
 
-    def _exec_buy_price(self, reference_price: float) -> float:
-        return reference_price * (1.0 + self.slippage_bps / 10000.0)
-
-    def _exec_sell_price(self, reference_price: float) -> float:
-        return max(reference_price * (1.0 - self.slippage_bps / 10000.0), 1e-12)
-
-    def buy(self, symbol: str, price: float, amount_usdt: float) -> dict | None:
-        """
-        买入
-        :param symbol: 交易对
-        :param price: 当前价格
-        :param amount_usdt: 花多少 USDT 买
-        :return: 交易记录
-        """
-        if amount_usdt > self.usdt_balance:
-            logger.warning(f"USDT 不足: 需要 {amount_usdt:.2f}, 可用 {self.usdt_balance:.2f}")
+    def buy(self, symbol: str, price: float, amount_pct: float = 0.3) -> dict | None:
+        """买入"""
+        if self.cash <= 0:
             return None
+        cost = self.cash * amount_pct
+        fee = cost * self.fee_rate
+        actual_cost = cost - fee
+        slippage = price * (self.slippage_pct / 100)
+        actual_price = price + slippage
+        coin_amount = actual_cost / actual_price
 
-        exec_px = self._exec_buy_price(price)
-        fee = amount_usdt * self.fee_rate
-        actual_spend = amount_usdt - fee
-        coin_amount = actual_spend / exec_px
-
-        self.usdt_balance -= amount_usdt
-        self.coin_balance += coin_amount
-        self.coin_symbol = symbol.split("/")[0]
+        self.cash -= cost
+        self.coin += coin_amount
+        self.buy_price = actual_price
 
         trade = {
-            "symbol": symbol,
+            "timestamp": 0,
             "side": "buy",
-            "price": exec_px,
+            "price": round(actual_price, 2),
             "amount": coin_amount,
-            "fee": fee,
-            "total": amount_usdt,
-            "timestamp": int(datetime.now().timestamp()),
-            "strategy": "",
+            "fee": round(fee, 4),
+            "total": round(cost, 2),
         }
         self.trades.append(trade)
-        logger.info(
-            f"买入: {coin_amount:.6f} {self.coin_symbol} "
-            f"@ {exec_px:.2f} USDT (手续费: {fee:.4f})"
-        )
         return trade
 
-    def sell(self, symbol: str, price: float) -> dict | None:
-        """
-        卖出全部持仓
-        :param symbol: 交易对
-        :param price: 当前价格
-        :return: 交易记录
-        """
-        if self.coin_balance <= 0:
-            logger.warning("无持仓可卖")
+    def sell(self, symbol: str, price: float, amount: float = 0.0) -> dict | None:
+        """卖出"""
+        if self.coin <= 0:
             return None
+        sell_amount = amount if amount > 0 else self.coin
+        slippage = price * (self.slippage_pct / 100)
+        actual_price = price - slippage
+        revenue = sell_amount * actual_price
+        fee = revenue * self.fee_rate
+        actual_revenue = revenue - fee
 
-        coin_amount = self.coin_balance
-        exec_px = self._exec_sell_price(price)
-        total_usdt = coin_amount * exec_px
-        fee = total_usdt * self.fee_rate
-        actual_receive = total_usdt - fee
+        profit = actual_revenue - (sell_amount * self.buy_price) if self.buy_price > 0 else 0
+        profit_pct = (profit / (sell_amount * self.buy_price) * 100) if self.buy_price > 0 else 0
 
-        self.coin_balance = 0
-        self.usdt_balance += actual_receive
+        self.cash += actual_revenue
+        self.coin -= sell_amount
 
         trade = {
-            "symbol": symbol,
+            "timestamp": 0,
             "side": "sell",
-            "price": exec_px,
-            "amount": coin_amount,
-            "fee": fee,
-            "total": actual_receive,
-            "timestamp": int(datetime.now().timestamp()),
-            "strategy": "",
+            "price": round(actual_price, 2),
+            "amount": sell_amount,
+            "fee": round(fee, 4),
+            "total": round(revenue, 2),
+            "profit": round(profit, 2),
+            "profit_pct": round(profit_pct, 2),
         }
         self.trades.append(trade)
-        logger.info(
-            f"卖出: {coin_amount:.6f} {self.coin_symbol} "
-            f"@ {exec_px:.2f} USDT (手续费: {fee:.4f})"
-        )
         return trade
 
-    def get_balance(self, current_price: float = 0) -> dict:
-        """获取当前账户状态"""
-        coin_value = self.coin_balance * current_price
-        total_value = self.usdt_balance + coin_value
+    def get_balance(self, price: float = 0.0) -> dict:
+        """获取余额"""
+        total_value = self.cash + self.coin * price
         profit = total_value - self.initial_balance
-        profit_pct = (profit / self.initial_balance) * 100 if self.initial_balance else 0
-
+        profit_pct = (profit / self.initial_balance * 100) if self.initial_balance > 0 else 0
         return {
-            "usdt_balance": self.usdt_balance,
-            "coin_balance": self.coin_balance,
-            "coin_symbol": self.coin_symbol,
-            "coin_value": coin_value,
-            "total_value": total_value,
-            "profit": profit,
-            "profit_pct": profit_pct,
-            "initial_balance": self.initial_balance,
+            "cash": round(self.cash, 2),
+            "coin": round(self.coin, 6),
+            "total_value": round(total_value, 2),
+            "profit": round(profit, 2),
+            "profit_pct": round(profit_pct, 2),
         }
-
-    def get_summary(self, current_price: float = 0) -> str:
-        """生成账户摘要"""
-        bal = self.get_balance(current_price)
-        lines = [
-            "=" * 50,
-            "  模拟盘账户摘要",
-            "=" * 50,
-            f"  初始资金:     {bal['initial_balance']:>12.2f} USDT",
-            f"  USDT 余额:    {bal['usdt_balance']:>12.2f} USDT",
-            f"  持仓数量:     {bal['coin_balance']:>12.6f} {bal['coin_symbol']}",
-            f"  持仓价值:     {bal['coin_value']:>12.2f} USDT",
-            "-" * 50,
-            f"  总资产:       {bal['total_value']:>12.2f} USDT",
-            f"  总盈亏:       {bal['profit']:>+12.2f} USDT ({bal['profit_pct']:+.2f}%)",
-            f"  交易次数:     {len(self.trades):>12d}",
-            "=" * 50,
-        ]
-        return "\n".join(lines)

@@ -1,47 +1,28 @@
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-.venv/
-env/
-
-# 密钥与本地配置（勿提交 Webhook、API Key）
+*.db
+*.sqlite3
 .env
 .env.*
-*.local
-
-# 数据库冷备份 (scripts/db_backup.py / main.py db-backup)
-backups/
-
-# 本地数据与日志
-data/*.db
-data/*.sqlite
-data/*.sqlite3
-data/live_signal_state.json
-data/audit.jsonl
-data/paper_live_state.json
-logs/
 *.log
-
-# 构建与打包产物
-build/
-dist/
-*.egg-info/
-quant_bot.egg-info/
-.pytest_cache/
-
-# 报告与图表（可本地生成）
-reports/*.png
-reports/*.pdf
-
-# IDE
+.venv/
+output/
+data/api_keys.json
+data/users.json
+data/.keys/
+data/grids/
+data/dca/
+data/smart_orders/
+data/copy_trading/
+data/marketplace/
+data/factors/
+data/akshare_cache/
+data/quant_bot.db
 .idea/
 .vscode/
-*.swp
-.DS_Store
-
-# 系统
-Thumbs.db
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+_original_*.txt
+_original_*.html
