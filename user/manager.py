@@ -3,6 +3,7 @@
 """
 import json
 import os
+from typing import Optional
 from datetime import datetime
 from utils.logger import get_logger
 
@@ -16,7 +17,7 @@ class UserManager:
 
     def __init__(self, file_path: str = USERS_FILE):
         self.file_path = file_path
-        self._users: dict[str, dict] = {}
+        self._users: dict = {}
         self._load()
 
     def _load(self):
@@ -29,7 +30,7 @@ class UserManager:
         with open(self.file_path, "w") as f:
             json.dump(self._users, f, indent=2, ensure_ascii=False)
 
-    def create_user(self, username: str, password: str, role: str = "user") -> dict | None:
+    def create_user(self, username: str, password: str, role: str = "user") -> Optional[dict]:
         if username in self._users:
             return None
         self._users[username] = {
@@ -42,10 +43,10 @@ class UserManager:
         logger.info(f"用户已创建: {username}")
         return self._users[username]
 
-    def get_user(self, username: str) -> dict | None:
+    def get_user(self, username: str) -> Optional[dict]:
         return self._users.get(username)
 
-    def list_users(self) -> list[dict]:
+    def list_users(self) -> list:
         return list(self._users.values())
 
     def delete_user(self, username: str) -> bool:
@@ -55,7 +56,7 @@ class UserManager:
         self._save()
         return True
 
-    def authenticate(self, username: str, password: str) -> dict | None:
+    def authenticate(self, username: str, password: str) -> Optional[dict]:
         user = self._users.get(username)
         if user and user.get("password") == password:
             return user

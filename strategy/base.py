@@ -1,6 +1,7 @@
 """
 策略基类 + 技术指标
 """
+from typing import Optional, List
 from utils.logger import get_logger
 
 logger = get_logger("strategy.base")
@@ -10,7 +11,7 @@ class Indicators:
     """技术指标计算"""
 
     @staticmethod
-    def sma(data: list[float], period: int) -> list[float | None]:
+    def sma(data: List[float], period: int) -> List[Optional[float]]:
         """简单移动平均"""
         result = [None] * (period - 1)
         for i in range(period - 1, len(data)):
@@ -18,7 +19,7 @@ class Indicators:
         return result
 
     @staticmethod
-    def ema(data: list[float], period: int) -> list[float | None]:
+    def ema(data: List[float], period: int) -> List[Optional[float]]:
         """指数移动平均"""
         if len(data) < period:
             return [None] * len(data)
@@ -32,7 +33,7 @@ class Indicators:
         return result
 
     @staticmethod
-    def rsi(data: list[float], period: int = 14) -> list[float | None]:
+    def rsi(data: List[float], period: int = 14) -> List[Optional[float]]:
         """RSI"""
         if len(data) < period + 1:
             return [None] * len(data)

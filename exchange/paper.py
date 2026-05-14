@@ -1,6 +1,7 @@
 """
 模拟盘交易所
 """
+from typing import Optional
 from utils.logger import get_logger
 
 logger = get_logger("exchange.paper")
@@ -18,7 +19,7 @@ class PaperExchange:
         self.trades = []
         self.buy_price = 0.0
 
-    def buy(self, symbol: str, price: float, amount_pct: float = 0.3) -> dict | None:
+    def buy(self, symbol: str, price: float, amount_pct: float = 0.3) -> Optional[dict]:
         """买入"""
         if self.cash <= 0:
             return None
@@ -44,7 +45,7 @@ class PaperExchange:
         self.trades.append(trade)
         return trade
 
-    def sell(self, symbol: str, price: float, amount: float = 0.0) -> dict | None:
+    def sell(self, symbol: str, price: float, amount: float = 0.0) -> Optional[dict]:
         """卖出"""
         if self.coin <= 0:
             return None

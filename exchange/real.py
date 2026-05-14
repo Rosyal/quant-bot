@@ -4,6 +4,7 @@
 """
 import os
 import json
+from typing import Optional
 from datetime import datetime
 from utils.logger import get_logger
 
@@ -15,7 +16,7 @@ class APIKeyManager:
 
     def __init__(self, keys_file: str = "data/api_keys.json"):
         self.keys_file = keys_file
-        self._keys: dict[str, dict] = {}
+        self._keys: dict = {}
         self._load()
 
     def _load(self):
@@ -39,7 +40,7 @@ class APIKeyManager:
         self._save()
         logger.info(f"API Key 已保存: {exchange}")
 
-    def get_key(self, exchange: str) -> dict | None:
+    def get_key(self, exchange: str) -> Optional[dict]:
         """获取 API Key"""
         return self._keys.get(exchange)
 
@@ -81,7 +82,7 @@ class RealExchange:
             logger.error("ccxt 未安装")
             return False
 
-    def get_balance(self) -> dict | None:
+    def get_balance(self) -> Optional[dict]:
         if not self._connect():
             return None
         try:
@@ -90,7 +91,7 @@ class RealExchange:
             logger.error(f"获取余额失败: {e}")
             return None
 
-    def create_market_buy(self, symbol: str, amount: float) -> dict | None:
+    def create_market_buy(self, symbol: str, amount: float) -> Optional[dict]:
         if not self._connect():
             return None
         try:
@@ -101,7 +102,7 @@ class RealExchange:
             logger.error(f"买入失败: {e}")
             return None
 
-    def create_market_sell(self, symbol: str, amount: float) -> dict | None:
+    def create_market_sell(self, symbol: str, amount: float) -> Optional[dict]:
         if not self._connect():
             return None
         try:
@@ -112,7 +113,7 @@ class RealExchange:
             logger.error(f"卖出失败: {e}")
             return None
 
-    def get_open_orders(self, symbol: str | None = None) -> list:
+    def get_open_orders(self, symbol: Optional[str] = None) -> list:
         if not self._connect():
             return []
         try:

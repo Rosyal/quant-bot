@@ -1,6 +1,7 @@
 """
 策略注册表
 """
+from typing import Optional, Dict, Type, List as TList
 from strategy.base import StrategyBase
 from strategy.ma_cross import MACrossStrategy
 from strategy.rsi import RSIStrategy
@@ -9,7 +10,7 @@ from strategy.bollinger import BollingerStrategy
 from strategy.multi_tf import MultiTFStrategy
 from strategy.combo import ComboStrategy
 
-_REGISTRY: dict[str, type[StrategyBase]] = {
+_REGISTRY: Dict[str, Type[StrategyBase]] = {
     "ma_cross": MACrossStrategy,
     "rsi": RSIStrategy,
     "macd": MACDStrategy,
@@ -19,7 +20,7 @@ _REGISTRY: dict[str, type[StrategyBase]] = {
 }
 
 
-def list_strategies() -> list[dict]:
+def list_strategies() -> list:
     """列出所有可用策略"""
     return [
         {"name": cls.name, "description": cls.description, "default_params": cls.default_params}
@@ -27,7 +28,7 @@ def list_strategies() -> list[dict]:
     ]
 
 
-def get_strategy(name: str, **params) -> StrategyBase | None:
+def get_strategy(name: str, **params) -> Optional[StrategyBase]:
     """获取策略实例"""
     cls = _REGISTRY.get(name)
     if cls is None:
@@ -35,7 +36,7 @@ def get_strategy(name: str, **params) -> StrategyBase | None:
     return cls(**params)
 
 
-def generate_signals(strategy_name: str, candles: list[dict], **params) -> list[dict]:
+def generate_signals(strategy_name: str, candles: list, **params) -> list:
     """用指定策略生成信号"""
     s = get_strategy(strategy_name, **params)
     if s is None:
